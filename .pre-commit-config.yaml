@@ -1,0 +1,52 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+repos:
+
+# General
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.4.0
+  hooks:
+  - id: check-case-conflict
+  - id: detect-private-key
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  - id: mixed-line-ending
+    args:
+    - --fix=lf
+  - id: check-added-large-files
+    args:
+    - --maxkb=1000
+  - id: check-merge-conflict
+
+# Secrets
+- repo: https://github.com/awslabs/git-secrets
+  rev: 80230afa8c8bdeac766a0fece36f95ffaa0be778
+  hooks:
+  - id: git-secrets
+    entry: git-secrets --scan
+    files: .
+
+# CloudFormation
+- repo: https://github.com/aws-cloudformation/cfn-python-lint
+  rev: v0.74.2
+  hooks:
+  - id: cfn-python-lint
+    name: cfn-lint
+    files: \.(template|yaml|json)$
+    exclude: ^\..*$
+
+- repo: https://github.com/aws-cloudformation/rain
+  rev: v1.3.2
+  hooks:
+  - id: cfn-format
+    name: cfn-format
+    files: \.(template)$
+
+- repo: https://github.com/stelligent/cfn_nag
+  rev: v0.8.10
+  hooks:
+  - id: cfn-nag
+    name: cfn-nag
+    files: \.(template|yaml|json)$
+    exclude: ^\..*$
