@@ -1,0 +1,289 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: |
+  Use this template as a sample of Reserving Capacity for your Auto Scaling Groups in AWS.
+    It creates a new VPC with 3 public subnets across 3 Availability Zones in a Selected Region, with a Specified nr of ODCRs in each AZ.
+    On top of this sits an Auto Scaling Group across all AZs, backed by the ODCRs via a Capacity Management Resource Group.
+    Note that this template will only work in Regions that have at least 3 Availability Zones!
+
+Parameters:
+  LatestAMIId:
+    Description: AMI to use for spinning up EC2 instances. Defaulting to the latest Amazon Linux AMI from the parameter store
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  EC2InstanceType:
+    Description: Instance typ to spin up. As this is for a demo purpose, we pick t2.micro as it is part of the Free Tier
+    Type: String
+    Default: t2.micro
+
+  VPCCIDR:
+    Description: CIDR block to use for the VPC. The only important thing here is that it is large enough to fit the subnets and Instances
+    Type: String
+    Default: 10.1.0.0/16
+
+  SubnetACIDR:
+    Description: CIDR block for the first subnet. Needs to be within the VPC CIDR range, not overlap with the other subnet CIDRs, and large enough to fit the Instances
+    Type: String
+    Default: 10.1.10.0/24
+
+  SubnetBCIDR:
+    Description: CIDR block for the second subnet. Needs to be within the VPC CIDR range, not overlap with the other subnet CIDRs, and large enough to fit the Instances
+    Type: String
+    Default: 10.1.20.0/24
+
+  SubnetCCIDR:
+    Description: CIDR block for the third subnet. Needs to be within the VPC CIDR range, not overlap with the other subnet CIDRs, and large enough to fit the Instances
+    Type: String
+    Default: 10.1.30.0/24
+
+  NrOfCapacityreservationsPerAZ:
+    Description: Nr of Capacity Reservations to make in each of the 3 Availability Zones
+    Type: Number
+    Default: 3
+    MinValue: 1
+
+  ASGMinSize:
+    Description: Minimum Size of the ASG. Defaulted to 0 here for maximum flexibility
+    Type: Number
+    Default: 0
+    MinValue: 0
+
+  ASGMaxSize:
+    Description: Max Size of the ASG. Defaulted to 12 here to accommodate the tests performed on it
+    Type: Number
+    Default: 12
+    MinValue: 0
+
+  ASGDesiredSize:
+    Description: Actual Size of the ASG at time of creation. Defaulted to 6 so that we have 2 Instances in each AZ
+    Type: Number
+    Default: 6
+    MinValue: 0
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: Flow logging would just complicate this scenario, and adds no value for this as a deminstration case for ODCRs
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetACIDR
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Public-A
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetBCIDR
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Public-B
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetCCIDR
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Public-C
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Public
+
+  PublicRoute1: # Public route table has direct routing to IGW:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetC
+      RouteTableId: !Ref PublicRouteTable
+
+  # ODCRs and Resource Group for them
+  CapacityReservationAvailabilityZoneA:
+    Type: AWS::EC2::CapacityReservation
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+      EndDateType: unlimited
+      InstanceCount: !Ref NrOfCapacityreservationsPerAZ
+      InstanceMatchCriteria: targeted
+      InstancePlatform: Linux/UNIX
+      InstanceType: t2.micro
+
+  CapacityReservationAvailabilityZoneB:
+    Type: AWS::EC2::CapacityReservation
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      EndDateType: unlimited
+      InstanceCount: !Ref NrOfCapacityreservationsPerAZ
+      InstanceMatchCriteria: targeted
+      InstancePlatform: Linux/UNIX
+      InstanceType: t2.micro
+
+  CapacityReservationAvailabilityZoneC:
+    Type: AWS::EC2::CapacityReservation
+    Properties:
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      EndDateType: unlimited
+      InstanceCount: !Ref NrOfCapacityreservationsPerAZ
+      InstanceMatchCriteria: targeted
+      InstancePlatform: Linux/UNIX
+      InstanceType: t2.micro
+
+  CapacityReservationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: ASGCapacityReservationResourceGroup
+      Description: Resource Group for letting the ASG utilize the ODCRs
+      Configuration:
+        - Type: AWS::EC2::CapacityReservationPool
+          Parameters: []
+        - Type: AWS::ResourceGroups::Generic
+          Parameters:
+            - Name: allowed-resource-types
+              Values:
+                - AWS::EC2::CapacityReservation
+      Resources: #ARNs are created using String replacement, as there at the time of writing this template is no ARN property of a Capacity Reservation in CloudFormation
+        - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:capacity-reservation/${CapacityReservationAvailabilityZoneA}
+        - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:capacity-reservation/${CapacityReservationAvailabilityZoneB}
+        - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:capacity-reservation/${CapacityReservationAvailabilityZoneC}
+
+  #Security and Auto Scaling Group
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W40
+            reason: We are intentionally allowing all outbound traffic, as this is an example for ODCRs. This should not be done for a production situation unless explicitly needed.
+          - id: W5
+            reason: Egress to the entire world is ok for this example. This should not be done for a production situation unless explicitly needed.
+    Properties:
+      GroupDescription: Open nothing for Ingress
+      VpcId: !Ref VPC
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - CidrIp: 127.0.0.1/32
+          Description: Dummy rule to block all outbound traffic by only allowing access to self, as we do not need it for this example
+          IpProtocol: "-1"
+
+  CapacityBackedLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${AWS::StackName}-launch-template
+      LaunchTemplateData:
+        InstanceType: !Ref EC2InstanceType
+        ImageId: !Ref LatestAMIId
+        CapacityReservationSpecification:
+          CapacityReservationTarget:
+            CapacityReservationResourceGroupArn: !GetAtt CapacityReservationResourceGroup.Arn
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref InstanceSecurityGroup
+            DeleteOnTermination: true
+
+  CapacityBackedASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+        - !Ref PublicSubnetC
+      LaunchTemplate:
+        LaunchTemplateId: !Ref CapacityBackedLaunchTemplate
+        Version: !GetAtt CapacityBackedLaunchTemplate.LatestVersionNumber
+      MaxSize: !Ref ASGMaxSize
+      MinSize: !Ref ASGMinSize
+      DesiredCapacity: !Ref ASGDesiredSize
+      Tags:
+        - Key: ODCRASG
+          Value: true
+          PropagateAtLaunch: false
+
+Outputs:
+  AutoScalingGroupName:
+    Description: The Name of the Solution's Auto Scaling Group
+    Value: !Ref CapacityBackedASG
+
+  SubnetForManuallyAddedInstance:
+    Description: Subnet to use when Manually Adding an instance to test the ODCR behaviour
+    Value: !Ref PublicSubnetA
+
+  SubnetsToKeepWhenDroppingASGAZ:
+    Description: Subnets to keep when dropping an ASG AZ to test the ODCR behaviour
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
