@@ -87,7 +87,7 @@ In its current form, this template will only work in Regions that have at least 
 
 ## Related Documentation
 
-- [AWS Compute Blog Post - Reserving Capacity for your ASG in case of AZ Failure - ODCRs and Resource Pools](http://TODO)
+- [AWS Compute Blog Post - Reserving EC2 Capacity across Availability Zones by utilizing On Demand Capacity Reservations (ODCRs)](http://TODO)
 
 ## Security
 
