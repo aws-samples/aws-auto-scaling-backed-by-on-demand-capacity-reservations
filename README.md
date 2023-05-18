@@ -87,7 +87,7 @@ In its current form, this template will only work in Regions that have at least 
 
 ## Related Documentation
 
-- [AWS Compute Blog Post - Reserving EC2 Capacity across Availability Zones by utilizing On Demand Capacity Reservations (ODCRs)](http://TODO)
+- [AWS Compute Blog Post - Reserving EC2 Capacity across Availability Zones by utilizing On Demand Capacity Reservations (ODCRs)](https://aws.amazon.com/blogs/compute/reserving-ec2-capacity-across-availability-zones-by-utilizing-on-demand-capacity-reservations-odcrs/)
 
 ## Security
 
